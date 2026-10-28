@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import calendar
 import io
 import math
@@ -3392,4 +3391,3 @@ with st.container(key="pagebody"):
                 ndup = int((df["dup_rank"] > 1).sum())
                 with st.expander(f"Duplicate entries ({ndup:,})", expanded=False):
                     duplicate_delete_ui("dash")
->>>>>>> f7c4b69 (Update running)
