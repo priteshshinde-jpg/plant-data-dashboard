@@ -1673,7 +1673,7 @@ with st.container(key="pagebody"):
                 term = sc1.text_input("Search (ID, Serial No, date, plant, material, site, TM Number, TM Name...)",
                                       key="dash_search", placeholder="e.g. 1234 ABC 2026-10")
                 scope = sc2.radio("Search in", ["All data", "Selected month + filters"],
-                                  horizontal=True, key="dash_search_scope")
+                                  horizontal=True, key="	dash_search_scope")
                 pool = df if scope == "All data" else cdf
                 if term.strip():
                     res = text_filter(pool, term)
