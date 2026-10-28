@@ -1,13 +1,6 @@
-<<<<<<< HEAD
 streamlit
 pandas
 openpyxl
 plotly
 altair
-=======
 
-streamlit
-pandas
-altair
-openpyxl
->>>>>>> f7c4b69 (Update running)
