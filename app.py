@@ -715,10 +715,10 @@ def calendar_ui(daily, month, metric, extreme="All"):
 
 
 def day_detail(cdf, month):
-    """Site-wise qty / amount for the clicked calendar day, with grade-wise rows inside each site."""
+    """Site-wise qty / amount for the clicked calendar day, with Pie chat rows inside each site."""
     sel = st.session_state.get("cal_sel")
     if not sel or not sel.startswith(month):
-        st.caption("Click any day to see its site-wise and grade-wise breakdown below.")
+        st.caption("Click any day to see its site-wise and Pie chat breakdown below.")
         return
     st.markdown('<div id="day-detail-anchor" style="scroll-margin-top:70px"></div>',
                 unsafe_allow_html=True)
@@ -1482,7 +1482,7 @@ with st.container(key="pagebody"):
             with st.container(border=True):
                 t1, t2, t3 = st.columns([5, 4, 4])
                 view_by = t1.radio("View as",
-                                   ["Calendar", "Day-wise chart", "Month-wise chart", "Grade-wise"],
+                                   ["Calendar", "Day-wise chart", "Month-wise chart", "Pie chat"],
                                    horizontal=True)
                 metric_choice = t2.radio("Show", ["Amount", "Qty", "Trips", "Both"],
                                          horizontal=True)
@@ -1495,7 +1495,7 @@ with st.container(key="pagebody"):
                     show_extremes(data, metric_choice)
                     calendar_ui(data, cur, metric_choice, extreme_choice)
                     day_detail(cdf, cur)
-                elif view_by == "Grade-wise":
+                elif view_by == "Pie chat":
                     st.subheader(f"Pie breakdown - {cur}")
                     dims = {"Grade": "material", "Site": "site", "Plant": "plant", "TM Name": "tm_name"}
                     pc1, pc2 = st.columns(2)
