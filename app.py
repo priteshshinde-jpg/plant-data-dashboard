@@ -307,9 +307,36 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ DB
 def conn():
-    c = sqlite3.connect(DB)
+    c = sqlite3.connect(DB, timeout=30)
     c.execute("PRAGMA foreign_keys = ON")
     return c
+
+
+_DUP_KEY = """CASE
+                        WHEN TRIM(COALESCE(e.serial_no, '')) <> ''
+                        THEN 'S|' || UPPER(TRIM(e.serial_no)) || '|' || e.plant_id
+                        ELSE 'F|' || e.entry_date || '|' || e.plant_id || '|' || e.material_id || '|'
+                             || COALESCE(TRIM(e.site), '') || '|' || COALESCE(TRIM(e.location), '') || '|'
+                             || e.qty || '|' || e.rate END"""
+
+ENTRIES_VIEW_SQL = f"""CREATE VIEW entries_v AS
+        SELECT e.id, e.entry_date AS date, substr(e.entry_date, 1, 7) AS month,
+               p.name AS plant, m.name AS material, m.unit,
+               COALESCE(NULLIF(TRIM(e.site), ''), 'Not set')     AS site,
+               COALESCE(NULLIF(TRIM(e.location), ''), 'Not set') AS location,
+               COALESCE(NULLIF(TRIM(l.vendor), ''), 'Not set')   AS tm_name,
+               COALESCE(TRIM(e.serial_no), '')                   AS serial_no,
+               e.qty, e.rate, e.amount,
+               SUM(e.qty) OVER (PARTITION BY e.plant_id, e.material_id, substr(e.entry_date, 1, 7)
+                                ORDER BY e.entry_date, e.id) AS cum_qty,
+               SUM(e.amount) OVER (PARTITION BY e.plant_id, e.material_id, substr(e.entry_date, 1, 7)
+                                   ORDER BY e.entry_date, e.id) AS cum_amount,
+               ROW_NUMBER() OVER (PARTITION BY {_DUP_KEY} ORDER BY e.id) AS dup_rank,
+               COUNT(*) OVER (PARTITION BY {_DUP_KEY}) AS dup_count
+        FROM entries e
+        JOIN plants p    ON p.id = e.plant_id
+        JOIN materials m ON m.id = e.material_id
+        LEFT JOIN locations l ON l.name = e.location"""
 
 
 def init_db():
@@ -350,37 +377,13 @@ def init_db():
         # TM Name (vendor) is stored in the TM number master
         if "vendor" not in [r[1] for r in c.execute("PRAGMA table_info(locations)")]:
             c.execute("ALTER TABLE locations ADD COLUMN vendor TEXT")
-        c.executescript(
-            """
-        DROP VIEW IF EXISTS entries_v;
-        CREATE VIEW entries_v AS
-        SELECT e.id, e.entry_date AS date, substr(e.entry_date, 1, 7) AS month,
-               p.name AS plant, m.name AS material, m.unit,
-               COALESCE(NULLIF(TRIM(e.site), ''), 'Not set')     AS site,
-               COALESCE(NULLIF(TRIM(e.location), ''), 'Not set') AS location,
-               COALESCE(NULLIF(TRIM(l.vendor), ''), 'Not set')   AS tm_name,
-               COALESCE(TRIM(e.serial_no), '')                   AS serial_no,
-               e.qty, e.rate, e.amount,
-               SUM(e.qty)    OVER w AS cum_qty,
-               SUM(e.amount) OVER w AS cum_amount,
-               ROW_NUMBER() OVER dr AS dup_rank,
-               COUNT(*)     OVER d  AS dup_count
-        FROM entries e
-        JOIN plants p    ON p.id = e.plant_id
-        JOIN materials m ON m.id = e.material_id
-        LEFT JOIN locations l ON l.name = e.location
-        WINDOW w AS (PARTITION BY e.plant_id, e.material_id,
-                                  substr(e.entry_date, 1, 7)
-                     ORDER BY e.entry_date, e.id),
-               d AS (PARTITION BY CASE
-                        WHEN TRIM(COALESCE(e.serial_no, '')) <> ''
-                        THEN 'S|' || UPPER(TRIM(e.serial_no)) || '|' || e.plant_id
-                        ELSE 'F|' || e.entry_date || '|' || e.plant_id || '|' || e.material_id || '|'
-                             || COALESCE(TRIM(e.site), '') || '|' || COALESCE(TRIM(e.location), '') || '|'
-                             || e.qty || '|' || e.rate END),
-               dr AS (d ORDER BY e.id);
-        """
-        )
+        # Re-create the view only when its definition changed. Streamlit re-runs this file on
+        # every click, so dropping/creating it each time needs a write lock and can fail with
+        # "database is locked" when another session or a DB viewer has the file open.
+        have_view = c.execute("SELECT sql FROM sqlite_master WHERE type='view' AND name='entries_v'").fetchone()
+        if have_view is None or (have_view[0] or "").strip() != ENTRIES_VIEW_SQL.strip():
+            c.execute("DROP VIEW IF EXISTS entries_v")
+            c.execute(ENTRIES_VIEW_SQL)
 
 
 def q(sql, params=()):
@@ -715,10 +718,10 @@ def calendar_ui(daily, month, metric, extreme="All"):
 
 
 def day_detail(cdf, month):
-    """Site-wise qty / amount for the clicked calendar day, with Pie chat rows inside each site."""
+    """Site-wise qty / amount for the clicked calendar day, with grade-wise rows inside each site."""
     sel = st.session_state.get("cal_sel")
     if not sel or not sel.startswith(month):
-        st.caption("Click any day to see its site-wise and Pie chat breakdown below.")
+        st.caption("Click any day to see its site-wise and grade-wise breakdown below.")
         return
     st.markdown('<div id="day-detail-anchor" style="scroll-margin-top:70px"></div>',
                 unsafe_allow_html=True)
@@ -1482,7 +1485,7 @@ with st.container(key="pagebody"):
             with st.container(border=True):
                 t1, t2, t3 = st.columns([5, 4, 4])
                 view_by = t1.radio("View as",
-                                   ["Calendar", "Day-wise chart", "Month-wise chart", "Pie chat"],
+                                   ["Calendar", "Day-wise chart", "Month-wise chart", "Grade-wise"],
                                    horizontal=True)
                 metric_choice = t2.radio("Show", ["Amount", "Qty", "Trips", "Both"],
                                          horizontal=True)
@@ -1495,7 +1498,7 @@ with st.container(key="pagebody"):
                     show_extremes(data, metric_choice)
                     calendar_ui(data, cur, metric_choice, extreme_choice)
                     day_detail(cdf, cur)
-                elif view_by == "Pie chat":
+                elif view_by == "Grade-wise":
                     st.subheader(f"Pie breakdown - {cur}")
                     dims = {"Grade": "material", "Site": "site", "Plant": "plant", "TM Name": "tm_name"}
                     pc1, pc2 = st.columns(2)
@@ -1673,7 +1676,7 @@ with st.container(key="pagebody"):
                 term = sc1.text_input("Search (ID, Serial No, date, plant, material, site, TM Number, TM Name...)",
                                       key="dash_search", placeholder="e.g. 1234 ABC 2026-10")
                 scope = sc2.radio("Search in", ["All data", "Selected month + filters"],
-                                  horizontal=True, key="	dash_search_scope")
+                                  horizontal=True, key="dash_search_scope")
                 pool = df if scope == "All data" else cdf
                 if term.strip():
                     res = text_filter(pool, term)
